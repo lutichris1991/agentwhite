@@ -30,17 +30,23 @@ if (Test-Path $venvDir) {
     Remove-Item -LiteralPath $venvDir -Recurse -Force
 }
 & $pythonExe @pythonArgs -m venv $venvDir
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
-if (-not (Test-Path $venvPython)) {
+if ($LASTEXITCODE -ne 0) {
     throw "AgentWhite could not create its Python environment."
 }
 
+$venvPython = Join-Path $venvDir "Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
+    throw "AgentWhite could not find the Python executable inside its environment."
+}
+
 Write-Host "Installing AgentWhite and Bluetooth support..." -ForegroundColor Cyan
-try {
-    & $venvPython -m pip install --disable-pip-version-check "$installDir[bluetooth]"
-} catch {
+& $venvPython -m pip install --disable-pip-version-check "$installDir[bluetooth]"
+if ($LASTEXITCODE -ne 0) {
     Write-Warning "Bluetooth package installation failed. Installing the base application instead. Wi-Fi and LAN features will still work offline."
     & $venvPython -m pip install --disable-pip-version-check $installDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "AgentWhite package installation failed."
+    }
 }
 
 $launcher = Join-Path $installDir "AgentWhite.cmd"
