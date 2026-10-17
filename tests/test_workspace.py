@@ -5,8 +5,8 @@ from agentwhite.workspace_ui import WORKSPACE_HTML
 
 
 class WorkspaceSmokeTests(unittest.TestCase):
-    def test_server_reports_v03(self):
-        self.assertEqual(AgentWhiteHandler.server_version, "AgentWhite/0.3")
+    def test_server_reports_v04(self):
+        self.assertEqual(AgentWhiteHandler.server_version, "AgentWhite/0.4")
 
     def test_workspace_ui_contains_persistent_navigation(self):
         self.assertIn("TARGET WORKSPACE", WORKSPACE_HTML)

@@ -17,6 +17,8 @@ from .analysis import REMEDIATION, analyze_wifi, fetch_http_resource, local_ai_s
 from .inspection import inspect_ble
 from .local_ai import analyze_findings
 from .storage import StateStore
+from .tool_registry import list_tools
+from .tools_ui import TOOLS_HTML
 from .webui import HTML
 from .workflow import available_actions
 from .workspace_ui import WORKSPACE_HTML
@@ -34,6 +36,7 @@ AGENTS = [
     {"name": "Remediation", "role": "Patch guidance"},
     {"name": "Retest", "role": "Repeat validation after fixes"},
     {"name": "Workflow", "role": "Save engagement state and wait for the operator before every next action"},
+    {"name": "Tool Registry", "role": "Third-party engines constrained by AgentWhite policy"},
     {"name": "AI Analyst", "role": "Evidence-grounded local Ollama analysis"},
 ]
 
@@ -45,7 +48,7 @@ ACTION_LABELS = {
 
 
 class AgentWhiteHandler(BaseHTTPRequestHandler):
-    server_version = "AgentWhite/0.3"
+    server_version = "AgentWhite/0.4"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[AgentWhite] {self.address_string()} - {fmt % args}")
@@ -84,13 +87,16 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             home = HTML.replace(
                 '<a class="btn" href="/api/export"',
-                '<a class="btn" href="/workspace">Target Workspaces</a>\n    <a class="btn" href="/ai">AI Analyst</a>\n    <a class="btn" href="/api/export"',
+                '<a class="btn" href="/workspace">Target Workspaces</a>\n    <a class="btn" href="/tools">Tool Registry</a>\n    <a class="btn" href="/ai">AI Analyst</a>\n    <a class="btn" href="/api/export"',
                 1,
             )
             self._html(home)
             return
         if parsed.path == "/workspace":
             self._html(WORKSPACE_HTML)
+            return
+        if parsed.path == "/tools":
+            self._html(TOOLS_HTML)
             return
         if parsed.path == "/ai":
             self._html(AI_HTML)
@@ -105,6 +111,9 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                     "ai": local_ai_status(),
                 }
             )
+            return
+        if parsed.path == "/api/tools":
+            self._json({"tools": list_tools()})
             return
         if parsed.path == "/api/workspace":
             query = parse_qs(parsed.query)
@@ -137,6 +146,7 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                     "devices": devices,
                     "findings": STORE.list_findings(),
                     "workspaces": workspaces,
+                    "tool_registry": list_tools(),
                 }
             )
             return
