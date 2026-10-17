@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -145,7 +146,74 @@ def _scan_wifi_linux() -> list[dict[str, Any]]:
     return devices
 
 
+async def _bleak_discover() -> list[dict[str, Any]]:
+    try:
+        from bleak import BleakScanner
+    except Exception:
+        return []
+
+    devices: list[dict[str, Any]] = []
+    try:
+        discovered = await BleakScanner.discover(timeout=6.0, return_adv=True)
+        if isinstance(discovered, dict):
+            for address, pair in discovered.items():
+                dev, adv = pair
+                name = getattr(dev, "name", None) or getattr(adv, "local_name", None) or "BLE device"
+                details = {
+                    "scanner": "bleak",
+                    "rssi": getattr(adv, "rssi", None),
+                    "service_uuids": list(getattr(adv, "service_uuids", []) or []),
+                    "manufacturer_ids": list((getattr(adv, "manufacturer_data", {}) or {}).keys()),
+                }
+                devices.append(
+                    {
+                        "id": _device_id("bluetooth", str(address)),
+                        "kind": "bluetooth",
+                        "name": str(name),
+                        "address": str(address),
+                        "details": details,
+                    }
+                )
+            return devices
+    except TypeError:
+        pass
+    except Exception:
+        return []
+
+    try:
+        simple = await BleakScanner.discover(timeout=6.0)
+    except Exception:
+        return []
+    for dev in simple:
+        address = str(getattr(dev, "address", "") or "")
+        name = str(getattr(dev, "name", None) or "BLE device")
+        if not address:
+            continue
+        devices.append(
+            {
+                "id": _device_id("bluetooth", address),
+                "kind": "bluetooth",
+                "name": name,
+                "address": address,
+                "details": {"scanner": "bleak"},
+            }
+        )
+    return devices
+
+
+def _scan_bluetooth_bleak() -> list[dict[str, Any]]:
+    try:
+        return asyncio.run(_bleak_discover())
+    except Exception:
+        return []
+
+
 def scan_bluetooth() -> list[dict[str, Any]]:
+    # Prefer an actual BLE advertisement scan when Bleak is installed.
+    devices = _scan_bluetooth_bleak()
+    if devices:
+        return devices
+
     system = platform.system().lower()
     if system == "windows":
         return _scan_bluetooth_windows()
@@ -177,7 +245,7 @@ def _scan_bluetooth_windows() -> list[dict[str, Any]]:
                 "kind": "bluetooth",
                 "name": name,
                 "address": instance,
-                "details": {"status": row.get("Status") or "Unknown", "instance_id": instance},
+                "details": {"status": row.get("Status") or "Unknown", "instance_id": instance, "scanner": "windows-pnp"},
             }
         )
     return devices
@@ -198,7 +266,7 @@ def _scan_bluetooth_linux() -> list[dict[str, Any]]:
                 "kind": "bluetooth",
                 "name": name,
                 "address": address,
-                "details": {},
+                "details": {"scanner": "bluetoothctl"},
             }
         )
     return devices
