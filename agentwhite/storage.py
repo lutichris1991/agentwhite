@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,7 @@ class StateStore:
         return conn
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS devices (
@@ -64,10 +65,11 @@ class StateStore:
                     ON findings(device_id);
                 """
             )
+            conn.commit()
 
     def upsert_devices(self, devices: list[dict[str, Any]]) -> None:
         now = _utc_now()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             for device in devices:
                 conn.execute(
                     """
@@ -92,6 +94,7 @@ class StateStore:
                         now,
                     ),
                 )
+            conn.commit()
 
     def list_devices(self, kind: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM devices"
@@ -100,21 +103,22 @@ class StateStore:
             sql += " WHERE kind = ?"
             params = (kind,)
         sql += " ORDER BY last_seen DESC, name ASC"
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(sql, params).fetchall()
         return [self._device_row(row) for row in rows]
 
     def get_device(self, device_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
         return self._device_row(row) if row else None
 
     def set_enrolled(self, device_id: str, enrolled: bool) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             conn.execute(
                 "UPDATE devices SET enrolled = ? WHERE id = ?",
                 (1 if enrolled else 0, device_id),
             )
+            conn.commit()
         return self.get_device(device_id)
 
     def add_finding(
@@ -128,7 +132,7 @@ class StateStore:
         remediation: str,
         status: str = "verified",
     ) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO findings (
@@ -147,7 +151,9 @@ class StateStore:
                     _utc_now(),
                 ),
             )
-            return int(cursor.lastrowid)
+            row_id = int(cursor.lastrowid)
+            conn.commit()
+            return row_id
 
     def list_findings(self, device_id: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM findings"
@@ -156,7 +162,7 @@ class StateStore:
             sql += " WHERE device_id = ?"
             params = (device_id,)
         sql += " ORDER BY created_at DESC, id DESC"
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(sql, params).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
