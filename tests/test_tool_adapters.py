@@ -6,12 +6,18 @@ from unittest.mock import patch
 
 from agentwhite.tool_adapters import TOOL_ACTIONS, list_tool_actions, run_tool_action
 from agentwhite.tool_history import ToolRunStore
+from agentwhite.tool_registry import TOOL_CATALOG
 
 
 class ToolAdapterTests(unittest.TestCase):
-    def test_pack_one_is_passive_fixed_and_never_auto_chains(self):
+    def test_every_registered_tool_has_a_ui_adapter(self):
+        registered = {str(row["id"]) for row in TOOL_CATALOG}
+        adapted = {action.tool_id for action in TOOL_ACTIONS}
+        self.assertEqual(registered, adapted)
+
+    def test_all_current_tool_buttons_are_passive_fixed_and_never_auto_chain(self):
         rows = list_tool_actions({a.tool_id for a in TOOL_ACTIONS})
-        self.assertGreaterEqual(len(rows), 15)
+        self.assertGreaterEqual(len(rows), 24)
         for row in rows:
             self.assertEqual(row["effect"], "PASSIVE")
             self.assertEqual(row["scope"], "local-host")
@@ -30,6 +36,15 @@ class ToolAdapterTests(unittest.TestCase):
         self.assertEqual(args[0], ["/usr/bin/kismet", "--version"])
         self.assertFalse(kwargs["shell"])
         self.assertEqual(kwargs["timeout"], 10)
+
+    def test_proxmark_adapter_uses_only_known_client_and_help_flag(self):
+        completed = SimpleNamespace(returncode=0, stdout="help", stderr="")
+        with patch("agentwhite.tool_adapters.shutil.which", side_effect=lambda x: "/usr/bin/pm3" if x == "pm3" else None), patch(
+            "agentwhite.tool_adapters.subprocess.run", return_value=completed
+        ) as runner:
+            result = run_tool_action("proxmark3.client")
+        self.assertEqual(result["result"]["argv"], ["pm3", "--help"])
+        self.assertFalse(runner.call_args.kwargs["shell"])
 
     def test_missing_executable_is_not_silently_faked(self):
         with patch("agentwhite.tool_adapters.shutil.which", return_value=None):
