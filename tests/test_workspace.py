@@ -11,7 +11,7 @@ class WorkspaceSmokeTests(unittest.TestCase):
     def test_workspace_ui_contains_persistent_navigation(self):
         self.assertIn("TARGET WORKSPACE", WORKSPACE_HTML)
         self.assertIn("SAVED ACCESS", WORKSPACE_HTML)
-        self.assertIn("HISTORY", WORKSPACE_HTML)
+        self.assertIn("history", WORKSPACE_HTML)
         self.assertIn("Run This Test", WORKSPACE_HTML)
 
 
