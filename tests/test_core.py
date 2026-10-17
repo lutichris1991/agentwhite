@@ -8,6 +8,7 @@ from unittest.mock import patch
 from agentwhite.analysis import HTTP_PORTS, analyze_wifi, fetch_http_resource
 from agentwhite.inspection import _format_value
 from agentwhite.storage import StateStore
+from agentwhite.workflow import available_actions
 
 
 class AnalysisTests(unittest.TestCase):
@@ -80,34 +81,78 @@ class InspectionTests(unittest.TestCase):
 
 
 class StorageTests(unittest.TestCase):
-    def test_enrollment_persists(self):
+    @staticmethod
+    def _seed(store: StateStore, kind: str = "lan", device_id: str = "lan-test") -> None:
+        store.upsert_devices([
+            {
+                "id": device_id,
+                "kind": kind,
+                "name": "Test Target",
+                "address": "192.168.1.20" if kind == "lan" else "00:11:22:33:44:55",
+                "details": {"mac": "00:11:22:33:44:55"},
+            }
+        ])
+
+    def test_enrollment_persists_and_creates_engagement(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "test.db")
-            store.upsert_devices([
-                {
-                    "id": "lan-test",
-                    "kind": "lan",
-                    "name": "192.168.1.20",
-                    "address": "192.168.1.20",
-                    "details": {"mac": "00:11:22:33:44:55"},
-                }
-            ])
+            self._seed(store)
             updated = store.set_enrolled("lan-test", True)
             self.assertTrue(updated["enrolled"])
-            self.assertTrue(store.get_device("lan-test")["enrolled"])
+            self.assertEqual(store.get_engagement("lan-test")["status"], "active")
+
+    def test_pause_scope_keeps_engagement_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "test.db")
+            self._seed(store)
+            store.set_enrolled("lan-test", True)
+            run_id = store.record_action_start(device_id="lan-test", action_id="lab.test", label="Lab Test")
+            store.complete_action(run_id, status="success", elapsed_ms=42, result={"ok": True})
+            store.set_enrolled("lan-test", False)
+            self.assertEqual(store.get_engagement("lan-test")["status"], "paused")
+            self.assertEqual(store.list_action_runs("lan-test")[0]["elapsed_ms"], 42)
+
+    def test_action_run_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "test.db")
+            self._seed(store)
+            store.set_enrolled("lan-test", True)
+            run_id = store.record_action_start(device_id="lan-test", action_id="lan.services.verify", label="Verify Services")
+            store.complete_action(run_id, status="success", elapsed_ms=123, result={"ports": [80]})
+            run = store.list_action_runs("lan-test")[0]
+            self.assertEqual(run["status"], "success")
+            self.assertEqual(run["result"]["ports"], [80])
+
+    def test_access_session_is_saved_and_updated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "test.db")
+            self._seed(store)
+            store.set_enrolled("lan-test", True)
+            first = store.upsert_access_session(
+                device_id="lan-test",
+                access_key="http:192.168.1.20:80",
+                kind="http",
+                label="HTTP",
+                status="ready",
+                endpoint={"address": "192.168.1.20", "port": 80, "path": "/"},
+            )
+            second = store.upsert_access_session(
+                device_id="lan-test",
+                access_key="http:192.168.1.20:80",
+                kind="http",
+                label="HTTP",
+                status="ready",
+                endpoint={"address": "192.168.1.20", "port": 80, "path": "/status"},
+            )
+            self.assertEqual(first, second)
+            sessions = store.list_access_sessions("lan-test")
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["endpoint"]["path"], "/status")
 
     def test_finding_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "test.db")
-            store.upsert_devices([
-                {
-                    "id": "lan-test",
-                    "kind": "lan",
-                    "name": "192.168.1.20",
-                    "address": "192.168.1.20",
-                    "details": {},
-                }
-            ])
+            self._seed(store)
             store.add_finding(
                 device_id="lan-test",
                 category="service-exposure",
@@ -118,6 +163,21 @@ class StorageTests(unittest.TestCase):
             )
             finding = store.list_findings("lan-test")[0]
             self.assertEqual(finding["proof"]["port"], 80)
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_wifi_workspace_only_proposes_action(self):
+        device = {"kind": "wifi", "id": "wifi-1"}
+        actions = available_actions(device, [], [])
+        self.assertEqual(actions[0]["id"], "wifi.configuration.audit")
+        self.assertTrue(actions[0]["repeatable"])
+
+    def test_http_finding_unlocks_view_button_without_running_it(self):
+        device = {"kind": "lan", "id": "lan-1"}
+        findings = [{"category": "service-exposure", "proof": {"port": 443}}]
+        actions = available_actions(device, findings, [])
+        ids = [a["id"] for a in actions]
+        self.assertIn("http.resource.inspect:443", ids)
 
 
 if __name__ == "__main__":
