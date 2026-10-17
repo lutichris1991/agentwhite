@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__
 from .adapters import scan
 from .analysis import analyze_wifi, fetch_http_resource, local_ai_status, verify_services, REMEDIATION
+from .inspection import inspect_ble
 from .storage import StateStore
 from .webui import HTML
 
@@ -23,7 +24,7 @@ AGENTS = [
     {"name": "Supervisor", "role": "Scope + orchestration"},
     {"name": "Recon", "role": "Wi-Fi / Bluetooth / LAN discovery"},
     {"name": "Verification", "role": "Independent proof of observable exposure"},
-    {"name": "AccessScope", "role": "Reachable services + resources"},
+    {"name": "AccessScope", "role": "Reachable services + post-access resource mapping"},
     {"name": "Evidence", "role": "Local reproducible evidence"},
     {"name": "Remediation", "role": "Patch guidance"},
     {"name": "Retest", "role": "Repeat validation after fixes"},
@@ -31,7 +32,7 @@ AGENTS = [
 
 
 class AgentWhiteHandler(BaseHTTPRequestHandler):
-    server_version = "AgentWhite/0.1"
+    server_version = "AgentWhite/0.2"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[AgentWhite] {self.address_string()} - {fmt % args}")
@@ -111,6 +112,9 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             if self.path in {"/api/verify", "/api/retest"}:
                 self._verify(body)
                 return
+            if self.path == "/api/inspect":
+                self._inspect(body)
+                return
             if self.path == "/api/resource":
                 self._resource(body)
                 return
@@ -175,7 +179,7 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                 {
                     "verified": 0,
                     "findings": [],
-                    "message": "Bluetooth inventory is working; active BLE service/characteristic validators are the next hardware milestone.",
+                    "message": "Use Inspect Access on this enrolled Bluetooth target to establish a BLE session and enumerate readable GATT resources.",
                 }
             )
             return
@@ -190,6 +194,45 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                 remediation=finding["remediation"],
             )
         self._json({"verified": len(findings), "findings": findings})
+
+    def _inspect(self, body: dict) -> None:
+        device_id = str(body.get("device_id", "")).strip()
+        try:
+            device = self._require_enrolled(device_id)
+        except PermissionError as exc:
+            self._json({"error": str(exc)}, status=HTTPStatus.FORBIDDEN)
+            return
+
+        kind = device.get("kind")
+        if kind != "bluetooth":
+            raise ValueError("Post-access inspection currently supports enrolled Bluetooth/BLE targets. LAN HTTP proof is available through the Resource Viewer.")
+
+        address = str(device.get("address") or "")
+        inspection = inspect_ble(address)
+        readable = int(inspection.get("readable_count") or 0)
+        connected = bool(inspection.get("connected"))
+        STORE.add_finding(
+            device_id=device_id,
+            category="bluetooth-access-verification",
+            severity="medium" if readable else "info",
+            title=(
+                f"BLE access verified: {readable} readable characteristic(s)"
+                if connected
+                else "BLE access session could not be established"
+            ),
+            proof={
+                "address": address,
+                "connected": connected,
+                "service_count": inspection.get("service_count", 0),
+                "characteristic_count": inspection.get("characteristic_count", 0),
+                "readable_count": readable,
+            },
+            remediation=(
+                "Review the exposed GATT characteristics and require pairing, bonding, encryption, or application-layer authorization for data that should not be readable by an ordinary nearby client. Remove unnecessary services and keep device firmware current."
+            ),
+            status="verified" if connected else "blocked",
+        )
+        self._json({"inspection": inspection})
 
     def _resource(self, body: dict) -> None:
         device_id = str(body.get("device_id", "")).strip()
@@ -226,7 +269,7 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
         STORE.add_finding(
             device_id=device_id,
             category="resource-verification",
-            severity="info" if verified else "info",
+            severity="info",
             title=title,
             proof=proof,
             remediation=REMEDIATION.get(
