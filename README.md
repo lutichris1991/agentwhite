@@ -8,9 +8,42 @@ The operating model is deliberately operator-controlled:
 
 AgentWhite does not automatically chain from one test into another.
 
-## What v0.4 adds
+## Operator modes
 
-v0.4 introduces the **Tool Registry**, the integration layer for third-party open-source security, radio, protocol, electronics, and hardware-analysis projects.
+AgentWhite v0.7 introduces two operator experiences over the same underlying validation engine.
+
+On first run, AgentWhite displays a mode-selection prompt that explains both choices before the user continues. The selected mode is stored locally in the browser and can later be changed from the Tool Center.
+
+### Simple Button Mode
+
+Simple Button Mode is the guided AgentWhite experience.
+
+- actions are presented as clear buttons;
+- only actions available for the current target/tool are shown;
+- target workspaces, findings, evidence, and history remain visible;
+- one selected action runs at a time;
+- AgentWhite stops after each result and waits for the operator.
+
+This mode is intended for fast, repeatable validation and for operators who do not need to enter action identifiers manually.
+
+### Advanced Manual Mode
+
+Advanced Manual Mode exposes a more direct expert interface while using the same AgentWhite backend and evidence model.
+
+- operators can enter registered tool-action IDs directly;
+- operators can select enrolled targets and enter available target-action IDs directly;
+- the UI shows the exact request that will be submitted;
+- raw JSON results are shown without hiding the underlying response data;
+- action history, evidence, elapsed time, findings, and target workspaces are retained;
+- automatic chaining remains disabled.
+
+Advanced Manual Mode is intentionally more flexible than Simple Button Mode, but it is **not an unrestricted shell or arbitrary command runner**. AgentWhite still requires registered actions and explicit target enrollment where applicable, rejects unknown/out-of-scope actions, records execution history, and keeps one-action-per-submit behavior. Arbitrary external-tool command lines are not accepted through this interface.
+
+Both modes are intended only for systems the operator owns or is explicitly authorized to assess.
+
+## Tool Registry
+
+The **Tool Registry** is the integration layer for third-party open-source security, radio, protocol, electronics, and hardware-analysis projects.
 
 The registry starts with a curated multi-protocol tool pack covering:
 
@@ -75,9 +108,9 @@ The workflow engine currently exposes the capabilities already implemented by Ag
 - HTTP/HTTPS returned-material viewer for verified local web services.
 - Read-only BLE GATT service/characteristic inspection for an enrolled Bluetooth target.
 
-The v0.4 registry is the foundation for adding the curated external engines one adapter at a time. Registering a tool does not automatically enable all of its upstream commands.
+The registry is the foundation for adding curated external engines one adapter at a time. Registering a tool does not automatically enable all of its upstream commands.
 
-Newly discovered capabilities become new buttons in the workspace; they are never executed automatically.
+Newly discovered capabilities become new buttons in Simple Mode and registered/available action choices in Advanced Mode; they are never executed automatically.
 
 ## Proof and access history
 
@@ -118,6 +151,8 @@ AgentWhite opens locally at:
 
 `http://127.0.0.1:8765`
 
+On first run, choose **Simple Button Mode** or **Advanced Manual Mode**. The choice is stored locally and can be changed later in **Tool Center**.
+
 Use **Target Workspaces** for persistent engagements and **Tool Registry** to inspect the available integration stack.
 
 ## Run directly
@@ -125,15 +160,23 @@ Use **Target Workspaces** for persistent engagements and **Tool Registry** to in
 Base application:
 
 ```bash
-python -m agentwhite.server
+python app.py
+```
+
+or after installing the package:
+
+```bash
+agentwhite
 ```
 
 For BLE discovery and inspection:
 
 ```bash
 pip install -e ".[bluetooth]"
-python -m agentwhite.server
+agentwhite
 ```
+
+The installed `agentwhite` command routes through the UI launcher so the first-run mode chooser and current UI preparation are enabled.
 
 ## Offline AI Analyst
 
@@ -143,11 +186,13 @@ If Ollama is installed locally and already has a model downloaded, AgentWhite ca
 $env:AGENTWHITE_MODEL="llama3.2:3b"
 ```
 
-The workflow engine itself does not require an LLM. Test availability and next-step buttons are deterministic software logic.
+The workflow engine itself does not require an LLM. Test availability and next-step choices are deterministic software logic.
 
 ## Scope model
 
 Passive discovery can list devices and networks visible to the host. Active validation, resource retrieval, BLE post-access inspection, and future third-party active adapters remain disabled until the target is explicitly enrolled.
+
+Advanced Manual Mode does not change the scope model. It changes how the operator selects and inspects registered actions, not whether scope checks exist.
 
 ## Data location
 
@@ -169,4 +214,4 @@ and:
 
 ## Current milestone
 
-v0.4 establishes the curated third-party Tool Registry while preserving the v0.3 persistent engagement model. The next development step is implementing individual typed adapters so each supported external engine contributes only explicit AgentWhite-approved actions and normalized evidence/results to the same workspace UI.
+v0.7 adds first-run operator-mode selection plus a persistent Simple/Advanced Tool Center switch. Simple Mode preserves the current guided button workflow. Advanced Mode adds manual registered-action entry, enrolled-target selection, request previews, and raw JSON result inspection while preserving AgentWhite's scope, logging, and stop-after-result behavior.
