@@ -1,0 +1,49 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - build/offline-auditor-v0.1
+    paths:
+      - "app.py"
+      - "requirements.txt"
+      - ".github/workflows/build-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build AgentWhite
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --name AgentWhite --collect-all bleak app.py
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item dist\AgentWhite.exe release\AgentWhite.exe
+          Copy-Item README.md release\README.md
+          Compress-Archive -Path release\* -DestinationPath AgentWhite-Windows.zip
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentWhite-Windows
+          path: AgentWhite-Windows.zip
+          if-no-files-found: error
