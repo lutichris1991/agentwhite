@@ -1,8 +1,11 @@
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
-from agentwhite.analysis import analyze_wifi
+from agentwhite.analysis import HTTP_PORTS, analyze_wifi, fetch_http_resource
 from agentwhite.storage import StateStore
 
 
@@ -24,6 +27,37 @@ class AnalysisTests(unittest.TestCase):
         }
         findings = analyze_wifi(device)
         self.assertEqual(findings[0]["severity"], "info")
+
+    def test_resource_viewer_captures_and_hashes_local_text(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b"agentwhite-proof"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, fmt, *args):
+                return
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_port
+            with tempfile.TemporaryDirectory() as tmp:
+                with patch.dict(HTTP_PORTS, {port: False}), patch(
+                    "agentwhite.analysis.data_dir", return_value=Path(tmp)
+                ):
+                    result = fetch_http_resource("127.0.0.1", port, "/")
+                self.assertEqual(result["status"], 200)
+                self.assertEqual(result["text_preview"], "agentwhite-proof")
+                self.assertEqual(len(result["sha256"]), 64)
+                self.assertTrue(Path(result["evidence_path"]).exists())
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 class StorageTests(unittest.TestCase):
