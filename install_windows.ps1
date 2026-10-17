@@ -54,7 +54,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $launcher = Join-Path $installDir "AgentWhite.cmd"
-$launchBody = "@echo off`r`ncd /d `"$installDir`"`r`n`"$venvPython`" -m agentwhite.server`r`n"
+$launchBody = "@echo off`r`ncd /d `"$installDir`"`r`n`"$venvPython`" app.py`r`n"
 Set-Content -LiteralPath $launcher -Value $launchBody -Encoding ASCII
 
 $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
@@ -69,8 +69,9 @@ $shortcut.Save()
 Write-Host "Installed to: $installDir" -ForegroundColor Cyan
 Write-Host "Start Menu shortcut created: AgentWhite" -ForegroundColor Cyan
 Write-Host "Bundled engines: Bleak, Scapy, python-can, pySerial, PyUSB" -ForegroundColor Cyan
-Write-Host "External engines such as Nmap/Wireshark remain separately licensed and are managed from the Tool Center." -ForegroundColor Yellow
+Write-Host "On first launch AgentWhite will prompt the user to install approved external Windows tools with one Update Tools button." -ForegroundColor Green
+Write-Host "Hardware-specific and other-OS engines remain separate and are explained in Tool Center." -ForegroundColor Yellow
 Write-Host "AgentWhite runs locally at http://127.0.0.1:8765" -ForegroundColor Cyan
-Write-Host "After installation the application does not require Internet access for normal scanning and validation." -ForegroundColor Green
+Write-Host "After setup, normal scanning and validation remain local/offline." -ForegroundColor Green
 Write-Host "Launching AgentWhite..." -ForegroundColor Green
 Start-Process -FilePath $launcher
