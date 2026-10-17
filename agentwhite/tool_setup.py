@@ -131,6 +131,7 @@ def setup_summary(tools: list[dict[str, Any]]) -> dict[str, int]:
         "bundled_engine_missing": 0,
         "external_setup": 0,
         "unsupported_platform": 0,
+        "winget_missing": 0,
     }
     for tool in tools:
         state = str((tool.get("setup") or {}).get("state") or "")
