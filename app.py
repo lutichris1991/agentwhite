@@ -1,10 +1,5 @@
-from agentwhite import server
-from agentwhite.setup_prompt import SETUP_PROMPT_HTML
-
-
-if SETUP_PROMPT_HTML not in server.HTML:
-    server.HTML = server.HTML.replace("</body>", SETUP_PROMPT_HTML + "</body>")
+from agentwhite.launcher import main
 
 
 if __name__ == "__main__":
-    server.main()
+    main()
