@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentwhite"
-version = "0.6.0"
+version = "0.7.0"
 description = "Local-first authorized wireless and device security validation console"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ tools = [
 build = ["pyinstaller>=6"]
 
 [project.scripts]
-agentwhite = "agentwhite.server:main"
+agentwhite = "agentwhite.launcher:main"
 
 [tool.setuptools.packages.find]
 include = ["agentwhite*"]
