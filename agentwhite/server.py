@@ -17,6 +17,8 @@ from .analysis import REMEDIATION, analyze_wifi, fetch_http_resource, local_ai_s
 from .inspection import inspect_ble
 from .local_ai import analyze_findings
 from .storage import StateStore
+from .tool_adapters import list_tool_actions, run_tool_action
+from .tool_history import ToolRunStore
 from .tool_registry import list_tools
 from .tools_ui import TOOLS_HTML
 from .webui import HTML
@@ -26,6 +28,7 @@ from .workspace_ui import WORKSPACE_HTML
 HOST = "127.0.0.1"
 PORT = 8765
 STORE = StateStore()
+TOOL_RUNS = ToolRunStore(STORE.db_path)
 
 AGENTS = [
     {"name": "Supervisor", "role": "Scope + orchestration"},
@@ -37,6 +40,7 @@ AGENTS = [
     {"name": "Retest", "role": "Repeat validation after fixes"},
     {"name": "Workflow", "role": "Save engagement state and wait for the operator before every next action"},
     {"name": "Tool Registry", "role": "Third-party engines constrained by AgentWhite policy"},
+    {"name": "Tool Adapter", "role": "Runs typed bounded recipes; never arbitrary shell commands"},
     {"name": "AI Analyst", "role": "Evidence-grounded local Ollama analysis"},
 ]
 
@@ -48,7 +52,7 @@ ACTION_LABELS = {
 
 
 class AgentWhiteHandler(BaseHTTPRequestHandler):
-    server_version = "AgentWhite/0.4"
+    server_version = "AgentWhite/0.5"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[AgentWhite] {self.address_string()} - {fmt % args}")
@@ -82,6 +86,15 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body must be a JSON object.")
         return parsed
 
+    def _tools_payload(self) -> dict:
+        tools = list_tools()
+        installed_ids = {str(tool["id"]) for tool in tools if tool.get("installed")}
+        return {
+            "tools": tools,
+            "actions": list_tool_actions(installed_ids),
+            "runs": TOOL_RUNS.list_runs(limit=100),
+        }
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/":
@@ -112,8 +125,8 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if parsed.path == "/api/tools":
-            self._json({"tools": list_tools()})
+        if parsed.path in {"/api/tools", "/api/tool-actions"}:
+            self._json(self._tools_payload())
             return
         if parsed.path == "/api/workspace":
             query = parse_qs(parsed.query)
@@ -147,6 +160,7 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                     "findings": STORE.list_findings(),
                     "workspaces": workspaces,
                     "tool_registry": list_tools(),
+                    "tool_runs": TOOL_RUNS.list_runs(limit=500),
                 }
             )
             return
@@ -163,6 +177,9 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                 return
             if self.path == "/api/action":
                 self._run_action(body)
+                return
+            if self.path == "/api/tool-action":
+                self._run_tool_action(body)
                 return
             if self.path in {"/api/verify", "/api/retest"}:
                 self._compat_verify(body)
@@ -186,8 +203,72 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, status=HTTPStatus.FORBIDDEN)
         except ValueError as exc:
             self._json({"error": str(exc)}, status=400)
+        except FileNotFoundError as exc:
+            self._json({"error": str(exc)}, status=409)
         except Exception as exc:
             self._json({"error": f"AgentWhite error: {exc}"}, status=500)
+
+    def _run_tool_action(self, body: dict) -> None:
+        action_id = str(body.get("action_id", "")).strip()
+        if not action_id:
+            raise ValueError("action_id is required")
+
+        tools = list_tools()
+        installed_ids = {str(tool["id"]) for tool in tools if tool.get("installed")}
+        actions = list_tool_actions(installed_ids)
+        action = next((row for row in actions if row["id"] == action_id), None)
+        if not action:
+            raise ValueError("Unknown tool action.")
+        if not action.get("available"):
+            raise FileNotFoundError("The required tool is not currently detected on this computer.")
+        if action.get("effect") != "PASSIVE" or action.get("scope") != "local-host":
+            raise PermissionError("This endpoint only permits the approved passive local-host adapter pack.")
+        if action.get("accepts_arbitrary_args"):
+            raise PermissionError("Arbitrary external-tool arguments are not permitted.")
+
+        started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        started = time.perf_counter()
+        try:
+            payload = run_tool_action(action_id)
+            elapsed_ms = max(0, int((time.perf_counter() - started) * 1000))
+            nested = payload.get("result") or {}
+            returncode = nested.get("returncode")
+            status = "success" if returncode in (None, 0) else "completed"
+            run_id = TOOL_RUNS.add_run(
+                tool_id=str(action["tool_id"]),
+                action_id=action_id,
+                label=str(action["label"]),
+                effect=str(action["effect"]),
+                scope=str(action["scope"]),
+                status=status,
+                started_at=started_at,
+                elapsed_ms=elapsed_ms,
+                result=payload,
+            )
+            self._json(
+                {
+                    "run_id": run_id,
+                    "status": status,
+                    "elapsed_ms": elapsed_ms,
+                    "result": payload,
+                    "next_action_started": False,
+                    **self._tools_payload(),
+                }
+            )
+        except Exception as exc:
+            elapsed_ms = max(0, int((time.perf_counter() - started) * 1000))
+            TOOL_RUNS.add_run(
+                tool_id=str(action["tool_id"]),
+                action_id=action_id,
+                label=str(action["label"]),
+                effect=str(action["effect"]),
+                scope=str(action["scope"]),
+                status="failed",
+                started_at=started_at,
+                elapsed_ms=elapsed_ms,
+                result={"error": str(exc), "auto_chain": False},
+            )
+            raise
 
     def _discover(self, body: dict) -> None:
         kind = str(body.get("kind", "all")).lower()
