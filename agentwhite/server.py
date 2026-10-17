@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import webbrowser
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 from .adapters import scan
-from .analysis import analyze_wifi, local_ai_status, verify_services
+from .analysis import analyze_wifi, fetch_http_resource, local_ai_status, verify_services, REMEDIATION
 from .storage import StateStore
 from .webui import HTML
 
@@ -110,6 +111,9 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             if self.path in {"/api/verify", "/api/retest"}:
                 self._verify(body)
                 return
+            if self.path == "/api/resource":
+                self._resource(body)
+                return
             self._json({"error": "Not found"}, status=404)
         except ValueError as exc:
             self._json({"error": str(exc)}, status=400)
@@ -142,18 +146,22 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             raise ValueError("Unknown device. Run discovery first.")
         self._json({"device": device})
 
-    def _verify(self, body: dict) -> None:
-        device_id = str(body.get("device_id", "")).strip()
+    def _require_enrolled(self, device_id: str) -> dict:
         if not device_id:
             raise ValueError("device_id is required")
         device = STORE.get_device(device_id)
         if not device:
             raise ValueError("Unknown device. Run discovery first.")
         if not device.get("enrolled"):
-            self._json(
-                {"error": "Active validation requires explicit target enrollment."},
-                status=HTTPStatus.FORBIDDEN,
-            )
+            raise PermissionError("Active validation requires explicit target enrollment.")
+        return device
+
+    def _verify(self, body: dict) -> None:
+        device_id = str(body.get("device_id", "")).strip()
+        try:
+            device = self._require_enrolled(device_id)
+        except PermissionError as exc:
+            self._json({"error": str(exc)}, status=HTTPStatus.FORBIDDEN)
             return
 
         findings: list[dict] = []
@@ -183,13 +191,60 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             )
         self._json({"verified": len(findings), "findings": findings})
 
+    def _resource(self, body: dict) -> None:
+        device_id = str(body.get("device_id", "")).strip()
+        try:
+            device = self._require_enrolled(device_id)
+        except PermissionError as exc:
+            self._json({"error": str(exc)}, status=HTTPStatus.FORBIDDEN)
+            return
+
+        if device.get("kind") != "lan":
+            raise ValueError("Resource viewing currently applies to enrolled LAN devices.")
+
+        try:
+            port = int(body.get("port"))
+        except (TypeError, ValueError):
+            raise ValueError("port must be an integer")
+        path = str(body.get("path", "/") or "/")
+        address = str(device.get("address") or "")
+        result = fetch_http_resource(address, port, path)
+
+        status = int(result.get("status") or 0)
+        verified = 200 <= status < 400
+        finding_status = "verified" if verified else "blocked"
+        title = (
+            f"HTTP resource access verified on TCP/{port}"
+            if verified
+            else f"HTTP resource access blocked or challenged on TCP/{port}"
+        )
+        proof = {
+            key: value
+            for key, value in result.items()
+            if key not in {"image_data_url", "text_preview", "hex_preview"}
+        }
+        STORE.add_finding(
+            device_id=device_id,
+            category="resource-verification",
+            severity="info" if verified else "info",
+            title=title,
+            proof=proof,
+            remediation=REMEDIATION.get(
+                port,
+                "Confirm this resource is intentionally reachable and protected by the expected authentication and network controls.",
+            ),
+            status=finding_status,
+        )
+        self._json({"verified": verified, "resource": result})
+
 
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), AgentWhiteHandler)
     url = f"http://{HOST}:{PORT}"
     print(f"AgentWhite {__version__} running locally at {url}")
     print("Press Ctrl+C to stop.")
-    threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+    if os.environ.get("AGENTWHITE_NO_BROWSER") != "1":
+        threading.Timer(0.7, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
