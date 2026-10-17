@@ -11,7 +11,9 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 from .adapters import scan
+from .aiui import AI_HTML
 from .analysis import analyze_wifi, fetch_http_resource, local_ai_status, verify_services, REMEDIATION
+from .local_ai import analyze_findings
 from .storage import StateStore
 from .webui import HTML
 
@@ -27,6 +29,7 @@ AGENTS = [
     {"name": "Evidence", "role": "Local reproducible evidence"},
     {"name": "Remediation", "role": "Patch guidance"},
     {"name": "Retest", "role": "Repeat validation after fixes"},
+    {"name": "AI Analyst", "role": "Evidence-grounded local Ollama analysis"},
 ]
 
 
@@ -68,7 +71,15 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            self._html(HTML)
+            home = HTML.replace(
+                '<a class="btn" href="/api/export"',
+                '<a class="btn" href="/ai">AI Analyst</a>\n    <a class="btn" href="/api/export"',
+                1,
+            )
+            self._html(home)
+            return
+        if parsed.path == "/ai":
+            self._html(AI_HTML)
             return
         if parsed.path == "/api/state":
             self._json(
@@ -113,6 +124,9 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
                 return
             if self.path == "/api/resource":
                 self._resource(body)
+                return
+            if self.path == "/api/ai-analysis":
+                self._ai_analysis(body)
                 return
             self._json({"error": "Not found"}, status=404)
         except ValueError as exc:
@@ -236,6 +250,14 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
             status=finding_status,
         )
         self._json({"verified": verified, "resource": result})
+
+    def _ai_analysis(self, body: dict) -> None:
+        device_id = str(body.get("device_id", "")).strip()
+        model = str(body.get("model", "")).strip() or None
+        if device_id and not STORE.get_device(device_id):
+            raise ValueError("Unknown device.")
+        findings = STORE.list_findings(device_id=device_id or None)
+        self._json(analyze_findings(findings, model=model))
 
 
 def main() -> None:
