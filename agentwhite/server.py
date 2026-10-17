@@ -19,6 +19,7 @@ from .local_ai import analyze_findings
 from .storage import StateStore
 from .webui import HTML
 from .workflow import available_actions
+from .workspace_ui import WORKSPACE_HTML
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -83,10 +84,13 @@ class AgentWhiteHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             home = HTML.replace(
                 '<a class="btn" href="/api/export"',
-                '<a class="btn" href="/ai">AI Analyst</a>\n    <a class="btn" href="/api/export"',
+                '<a class="btn" href="/workspace">Target Workspaces</a>\n    <a class="btn" href="/ai">AI Analyst</a>\n    <a class="btn" href="/api/export"',
                 1,
             )
             self._html(home)
+            return
+        if parsed.path == "/workspace":
+            self._html(WORKSPACE_HTML)
             return
         if parsed.path == "/ai":
             self._html(AI_HTML)
