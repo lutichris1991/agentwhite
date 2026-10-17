@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 authors = [{ name = "AgentWhite" }]
 dependencies = []
 
+[project.optional-dependencies]
+bluetooth = ["bleak>=0.22"]
+build = ["pyinstaller>=6"]
+
 [project.scripts]
 agentwhite = "agentwhite.server:main"
 
