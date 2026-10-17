@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import http.client
 import ipaddress
 import json
 import os
 import socket
+import ssl
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+from .storage import data_dir
 
 COMMON_PORTS: dict[int, str] = {
     22: "SSH",
@@ -25,6 +33,8 @@ COMMON_PORTS: dict[int, str] = {
     8443: "HTTPS-alt",
     9100: "JetDirect",
 }
+
+HTTP_PORTS = {80: False, 443: True, 8000: False, 8080: False, 8443: True}
 
 REMEDIATION: dict[int, str] = {
     22: "Restrict SSH to trusted management hosts, require strong key-based authentication, and disable unused accounts.",
@@ -122,6 +132,113 @@ def _http_metadata(address: str, port: int, tls: bool) -> dict[str, Any]:
         return {"http_status": exc.code, "server_header": exc.headers.get("Server")}
     except Exception:
         return {}
+
+
+def _safe_evidence_suffix(content_type: str) -> str:
+    ctype = content_type.lower()
+    if ctype == "image/jpeg":
+        return ".jpg"
+    if ctype == "image/png":
+        return ".png"
+    if ctype == "image/gif":
+        return ".gif"
+    if ctype == "image/webp":
+        return ".webp"
+    if ctype in {"application/json", "text/json"}:
+        return ".json"
+    if "html" in ctype:
+        return ".html"
+    if ctype.startswith("text/"):
+        return ".txt"
+    return ".bin"
+
+
+def fetch_http_resource(
+    address: str,
+    port: int,
+    path: str = "/",
+    *,
+    max_bytes: int = 524_288,
+) -> dict[str, Any]:
+    """Fetch one explicitly requested resource from an enrolled local HTTP(S) service.
+
+    This does not follow redirects or attempt authentication bypass. It is used to prove
+    what an already-reachable enrolled service actually returns.
+    """
+    if not _private_or_local_ip(address):
+        raise ValueError("Resource viewing is limited to private, loopback, or link-local IP addresses.")
+    if port not in HTTP_PORTS:
+        raise ValueError("Resource viewing is only available for verified HTTP/HTTPS service ports.")
+    if not path.startswith("/") or "\r" in path or "\n" in path or "://" in path:
+        raise ValueError("path must be a local HTTP path beginning with '/'.")
+
+    tls = HTTP_PORTS[port]
+    if tls:
+        context = ssl._create_unverified_context()
+        conn: http.client.HTTPConnection = http.client.HTTPSConnection(address, port, timeout=2.5, context=context)
+    else:
+        conn = http.client.HTTPConnection(address, port, timeout=2.5)
+
+    try:
+        conn.request(
+            "GET",
+            path,
+            headers={
+                "User-Agent": "AgentWhite/0.1",
+                "Accept": "*/*",
+                "Connection": "close",
+            },
+        )
+        response = conn.getresponse()
+        raw = response.read(max_bytes + 1)
+        truncated = len(raw) > max_bytes
+        raw = raw[:max_bytes]
+        content_type = (response.getheader("Content-Type") or "application/octet-stream").split(";", 1)[0].strip().lower()
+        digest = hashlib.sha256(raw).hexdigest()
+
+        evidence_dir = data_dir() / "evidence"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_addr = address.replace(":", "_").replace("/", "_")
+        filename = f"{safe_addr}_{port}_{stamp}{_safe_evidence_suffix(content_type)}"
+        evidence_path = evidence_dir / filename
+        if raw:
+            evidence_path.write_bytes(raw)
+
+        result: dict[str, Any] = {
+            "address": address,
+            "port": port,
+            "path": path,
+            "status": response.status,
+            "reason": response.reason,
+            "content_type": content_type,
+            "bytes_captured": len(raw),
+            "truncated": truncated,
+            "sha256": digest,
+            "evidence_path": str(evidence_path) if raw else None,
+            "headers": {
+                "server": response.getheader("Server"),
+                "content_length": response.getheader("Content-Length"),
+                "www_authenticate": response.getheader("WWW-Authenticate"),
+                "location": response.getheader("Location"),
+            },
+        }
+
+        if content_type in {"image/jpeg", "image/png", "image/gif", "image/webp"} and raw:
+            result["image_data_url"] = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+        elif (
+            content_type.startswith("text/")
+            or content_type in {"application/json", "application/xml", "application/javascript"}
+        ):
+            result["text_preview"] = raw.decode("utf-8", "replace")
+        elif raw:
+            result["hex_preview"] = raw[:256].hex(" ")
+
+        return result
+    except (OSError, http.client.HTTPException) as exc:
+        raise ValueError(f"Could not retrieve resource: {exc}") from exc
+    finally:
+        conn.close()
 
 
 def analyze_wifi(device: dict[str, Any]) -> list[dict[str, Any]]:
