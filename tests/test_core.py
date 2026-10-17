@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agentwhite.analysis import HTTP_PORTS, analyze_wifi, fetch_http_resource
+from agentwhite.inspection import _format_value
 from agentwhite.storage import StateStore
 
 
@@ -58,6 +59,24 @@ class AnalysisTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+
+class InspectionTests(unittest.TestCase):
+    def test_printable_ble_value_has_text_preview(self):
+        result = _format_value(b"AgentWhite proof")
+        self.assertEqual(result["text"], "AgentWhite proof")
+        self.assertFalse(result["truncated"])
+
+    def test_binary_ble_value_keeps_hex_preview(self):
+        result = _format_value(bytes([0, 1, 2, 255]))
+        self.assertIsNone(result["text"])
+        self.assertEqual(result["hex"], "00 01 02 ff")
+
+    def test_ble_value_is_bounded(self):
+        result = _format_value(b"A" * 300, max_bytes=32)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["bytes"], 300)
+        self.assertEqual(len(result["text"]), 32)
 
 
 class StorageTests(unittest.TestCase):
