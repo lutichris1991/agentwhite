@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentwhite"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local-first authorized wireless and device security validation console"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,12 @@ dependencies = []
 
 [project.optional-dependencies]
 bluetooth = ["bleak>=0.22"]
+tools = [
+    "scapy>=2.6,<3",
+    "python-can>=4.4,<5",
+    "pyserial>=3.5,<4",
+    "pyusb>=1.2,<2",
+]
 build = ["pyinstaller>=6"]
 
 [project.scripts]

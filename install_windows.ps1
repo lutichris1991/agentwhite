@@ -39,13 +39,17 @@ if (-not (Test-Path $venvPython)) {
     throw "AgentWhite could not find the Python executable inside its environment."
 }
 
-Write-Host "Installing AgentWhite and Bluetooth support..." -ForegroundColor Cyan
-& $venvPython -m pip install --disable-pip-version-check "$installDir[bluetooth]"
+Write-Host "Installing AgentWhite, Bluetooth, and bundled tool engines..." -ForegroundColor Cyan
+& $venvPython -m pip install --disable-pip-version-check "$installDir[bluetooth,tools]"
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Bluetooth package installation failed. Installing the base application instead. Wi-Fi and LAN features will still work offline."
-    & $venvPython -m pip install --disable-pip-version-check $installDir
+    Write-Warning "The full tool bundle could not be installed. Retrying with Bluetooth support only."
+    & $venvPython -m pip install --disable-pip-version-check "$installDir[bluetooth]"
     if ($LASTEXITCODE -ne 0) {
-        throw "AgentWhite package installation failed."
+        Write-Warning "Bluetooth package installation failed. Installing the base application instead."
+        & $venvPython -m pip install --disable-pip-version-check $installDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "AgentWhite package installation failed."
+        }
     }
 }
 
@@ -64,6 +68,8 @@ $shortcut.Save()
 
 Write-Host "Installed to: $installDir" -ForegroundColor Cyan
 Write-Host "Start Menu shortcut created: AgentWhite" -ForegroundColor Cyan
+Write-Host "Bundled engines: Bleak, Scapy, python-can, pySerial, PyUSB" -ForegroundColor Cyan
+Write-Host "External engines such as Nmap/Wireshark remain separately licensed and are managed from the Tool Center." -ForegroundColor Yellow
 Write-Host "AgentWhite runs locally at http://127.0.0.1:8765" -ForegroundColor Cyan
 Write-Host "After installation the application does not require Internet access for normal scanning and validation." -ForegroundColor Green
 Write-Host "Launching AgentWhite..." -ForegroundColor Green

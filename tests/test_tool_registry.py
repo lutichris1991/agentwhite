@@ -38,13 +38,14 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(nmap["bundle_policy"], "external-only")
 
     def test_tool_center_is_easy_button_driven(self):
-        self.assertEqual(AgentWhiteHandler.server_version, "AgentWhite/0.5")
+        self.assertEqual(AgentWhiteHandler.server_version, "AgentWhite/0.6")
         self.assertIn("TOOL CENTER", TOOLS_HTML)
+        self.assertIn("SETUP CENTER", TOOLS_HTML)
         self.assertIn("QUICK ACTIONS", TOOLS_HTML)
         self.assertIn("TOOL FAMILIES", TOOLS_HTML)
         self.assertIn("TOOL HISTORY", TOOLS_HTML)
         self.assertIn("AUTO-CHAIN OFF", TOOLS_HTML)
-        self.assertIn("Run", TOOLS_HTML)
+        self.assertIn("Install", TOOLS_HTML)
         self.assertIn("WI-FI", TOOLS_HTML)
         self.assertIn("BLUETOOTH", TOOLS_HTML)
         self.assertIn("RFID / NFC", TOOLS_HTML)
