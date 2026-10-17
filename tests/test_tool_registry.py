@@ -37,10 +37,12 @@ class ToolRegistryTests(unittest.TestCase):
         nmap = next(row for row in TOOL_CATALOG if row["id"] == "nmap")
         self.assertEqual(nmap["bundle_policy"], "external-only")
 
-    def test_v04_ui_is_exposed(self):
-        self.assertEqual(AgentWhiteHandler.server_version, "AgentWhite/0.4")
+    def test_v05_ui_is_exposed(self):
+        self.assertEqual(AgentWhiteHandler.server_version, "AgentWhite/0.5")
         self.assertIn("TOOL REGISTRY", TOOLS_HTML)
         self.assertIn("AUTO-CHAIN DISABLED", TOOLS_HTML)
+        self.assertIn("TOOL HISTORY", TOOLS_HTML)
+        self.assertIn("Run This Action", TOOLS_HTML)
 
 
 if __name__ == "__main__":
